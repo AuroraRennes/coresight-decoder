@@ -72,6 +72,7 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       }
 
       case PacketType::ETM4_PKT_I_ADDR_S_IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         const std::optional<Location> optional_start_location =
@@ -161,6 +162,7 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       }
 
       case PacketType::ETM4_PKT_I_ADDR_S_IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         // An address packet is generated in the following three cases:
@@ -441,6 +443,7 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
       }
 
       case PacketType::ETM4_PKT_I_ADDR_S_IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         const std::optional<Location> optional_target_location =
