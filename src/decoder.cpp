@@ -41,9 +41,20 @@ Packet Decoder::decodePacket() {
     result = this->decodeExceptionPacket();
     break;
 
+  // Data synchronization markers packet header: 0b00101011
+  case 0b00101011:
+    result = {PacketType::PKT_UNKNOWN, 1, 0, 0, 0};
+    break;
+
   // Context packet header: 0b1000000x
   case 0b10000000 ... 0b10000001:
     result = this->decodeContextPacket();
+    break;
+  
+  // Exact Match Address packet header: 0b10010000 to 0b10010010
+  case 0b10010000 ... 0b10010010:
+    std::cout << "PACKET: Exact Match Address" << std::endl;
+    result = {PacketType::PKT_UNKNOWN, 1, 0, 0, 0};
     break;
 
   // 64-bit IS0 long Address and Context packet header: 0b10000101
@@ -322,7 +333,7 @@ const std::size_t rest_data_size =
     uint64_t prev_address = this->address_reg;
     this->address_reg = (prev_address & ~masks ) | (address & masks);
     Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_32IS0, 5, 0, 0, this->address_reg};
-  return packet;
+    return packet;
 }
 
 Packet Decoder::decodeAddressLong64IS0Packet() {
