@@ -64,6 +64,8 @@ all: $(TARGET) $(LIBTARGET)
 
 debug: CXXFLAGS += -DDEBUG_BUILD
 debug: CXXFLAGS += -g
+debug: CXXFLAGS += -O0
+debug: CXXFLAGS += -DPRINT_EDGE_COV
 debug: $(TARGET) $(LIBTARGET)
 
 $(TARGET): $(OBJS)
