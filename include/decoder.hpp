@@ -18,6 +18,7 @@ enum class PacketType {
   // Address and Context
   ETM4_PKT_I_CTXT,
   ETM4_PKT_I_ADDR_S_IS0,
+  ETM4_PKT_I_ADDR_L_32IS0,
   ETM4_PKT_I_ADDR_L_64IS0,
   ETM4_PKT_I_ADDR_CTXT_L_64IS0,
 
@@ -81,6 +82,7 @@ private:
   Packet decodeExceptionPacket();
 
   Packet decodeAddressShortIS0Packet();
+  Packet decodeAddressLong32IS0Packet();
   Packet decodeAddressLong64IS0Packet();
   Packet decodeAddressLong64IS0WithContextPacket();
 

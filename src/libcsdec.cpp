@@ -129,9 +129,16 @@ libcsdec_result_t libcsdec_run_edge(const libcsdec_t libcsdec,
                                     const size_t trace_data_size) {
   auto process = reinterpret_cast<Process *>(libcsdec);
 
-  ProcessResultType result = process->run(
-      reinterpret_cast<const std::uint8_t *>(trace_data_addr), trace_data_size);
-  return covert_result_type(result);
+  try {
+    ProcessResultType result = process->run(
+    reinterpret_cast<const std::uint8_t *>(trace_data_addr), trace_data_size);
+    return covert_result_type(result);
+  }
+  catch(const std::exception& e) {
+    // Maybe save trace_data for debug decoder?
+    std::cerr << "Decoder throw exception"<< std::endl;
+    return LIBCSDEC_ERROR;
+  }
 }
 
 /**

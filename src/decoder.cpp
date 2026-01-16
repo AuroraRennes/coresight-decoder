@@ -41,9 +41,20 @@ Packet Decoder::decodePacket() {
     result = this->decodeExceptionPacket();
     break;
 
+  // Data synchronization markers packet header: 0b00101011
+  case 0b00101011:
+    result = {PacketType::PKT_UNKNOWN, 1, 0, 0, 0};
+    break;
+
   // Context packet header: 0b1000000x
   case 0b10000000 ... 0b10000001:
     result = this->decodeContextPacket();
+    break;
+  
+  // Exact Match Address packet header: 0b10010000 to 0b10010010
+  case 0b10010000 ... 0b10010010:
+    std::cout << "PACKET: Exact Match Address" << std::endl;
+    result = {PacketType::PKT_UNKNOWN, 1, 0, 0, 0};
     break;
 
   // 64-bit IS0 long Address and Context packet header: 0b10000101
@@ -54,6 +65,11 @@ Packet Decoder::decodePacket() {
   // IS0 Short Address packet header: 0b10010101
   case 0b10010101:
     result = this->decodeAddressShortIS0Packet();
+    break;
+
+  // 32-bit IS0 long address packet header: 0b10011010
+  case 0b10011010:
+    result = this->decodeAddressLong32IS0Packet();
     break;
 
   // 64-bit IS0 long Address packet header: 0b10011101
@@ -300,6 +316,26 @@ Packet Decoder::decodeAddressShortIS0Packet() {
   return packet;
 }
 
+Packet Decoder::decodeAddressLong32IS0Packet(){
+const std::size_t rest_data_size =
+    this->trace_data.size() - this->trace_data_offset;
+    // Header is correct, but packet size is incomplete.
+    if (rest_data_size < 5) {
+      return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+    }
+    uint64_t masks = 0xffffffff;  
+    // trace_data[this->trace_data_offset] is header
+    uint32_t address = ((uint32_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 2 |
+        ((uint32_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 9 |
+        ((uint32_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
+        ((uint32_t)this->trace_data[this->trace_data_offset + 4]) << 24;
+
+    uint64_t prev_address = this->address_reg;
+    this->address_reg = (prev_address & ~masks ) | (address & masks);
+    Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_32IS0, 5, 0, 0, this->address_reg};
+    return packet;
+}
+
 Packet Decoder::decodeAddressLong64IS0Packet() {
   const std::size_t rest_data_size =
       this->trace_data.size() - this->trace_data_offset;
@@ -525,6 +561,10 @@ std::string Packet::toString() const {
 
   case PacketType::ETM4_PKT_I_ADDR_S_IS0:
     stream << "ETM4_PKT_I_ADDR_S_IS0 Addr=" << std::hex << "0x" << this->addr;
+    break;
+
+  case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
+    stream << "ETM4_PKT_I_ADDR_L_32IS0 Addr=" << std::hex << "0x" << this->addr;
     break;
 
   case PacketType::ETM4_PKT_I_ADDR_L_64IS0:

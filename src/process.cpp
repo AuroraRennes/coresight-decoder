@@ -68,10 +68,11 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
         // Otherwise, the trace start address is not known.
         std::cerr << "The first branch packet is always an address pocket."
                   << std::endl;
-        std::exit(EXIT_FAILURE);
+        return ProcessResultType::PROCESS_ERROR_TRACE_DATA_INCOMPLETE;
       }
 
       case PacketType::ETM4_PKT_I_ADDR_S_IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         const std::optional<Location> optional_start_location =
@@ -161,6 +162,7 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       }
 
       case PacketType::ETM4_PKT_I_ADDR_S_IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         // An address packet is generated in the following three cases:
@@ -229,14 +231,23 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
     }
 
     case DecodeState::EXCEPTION_ADDR1: {
-      if (packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0) {
+       /*
+      This field is the address for an Exception element, and it is always present in the packet. The E0 and
+      E1 fields indicate how to interpret this field. The ADDRESS field takes the form of one of the
+      Address packets, so that the field itself takes the form of a Short Address packet, a Long Address
+      packet, an Exact Match Address packet, or an Address with Context packet, complete with header.
+      From: ARM IHI0064H.b, ID101923, page 6-267
+      */
+      if (packet.type == PacketType::ETM4_PKT_I_ADDR_S_IS0 || 
+          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0) {
         this->decoder.state = DecodeState::EXCEPTION_ADDR2;
       }
       break;
     }
 
     case DecodeState::EXCEPTION_ADDR2: {
-      if (packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0) {
+      if (packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0 ||
+          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0) {
         this->decoder.state = DecodeState::TRACE;
       }
       break;
@@ -441,6 +452,7 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
       }
 
       case PacketType::ETM4_PKT_I_ADDR_S_IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         const std::optional<Location> optional_target_location =
