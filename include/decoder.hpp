@@ -2,6 +2,7 @@
 /* Copyright 2021 Ricerca Security, Inc. All rights reserved. */
 
 #pragma once
+#include <array>
 
 enum class PacketType {
   // Extension header
@@ -67,9 +68,11 @@ struct Decoder {
   DecodeState state;
 
   std::uint64_t address_reg;
+  std::array<std::uint64_t, 3> address_regs = {0,0,0};
 
   Packet decodePacket();
   void reset();
+  void update_address_regs(uint64_t);
 
 private:
   Packet decodeExtensionPacket();

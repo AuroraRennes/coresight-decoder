@@ -75,6 +75,7 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
+        this->decoder.update_address_regs(packet.addr);
         const std::optional<Location> optional_start_location =
             getLocation(this->state.memory_maps, packet.addr);
 
@@ -165,6 +166,7 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
+        this->decoder.update_address_regs(packet.addr);
         // An address packet is generated in the following three cases:
         //   1. Generated to indicate the trace start address at the start of
         //      the trace.

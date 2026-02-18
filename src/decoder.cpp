@@ -6,6 +6,7 @@
 #include <optional>
 #include <sstream>
 #include <vector>
+#include <algorithm>
 
 #include "decoder.hpp"
 #include "deformatter.hpp"
@@ -129,6 +130,11 @@ void Decoder::reset() {
   this->trace_data = std::vector<std::uint8_t>();
   this->trace_data_offset = 0;
   this->state = DecodeState::START;
+}
+
+void Decoder::update_address_regs(uint64_t address){
+  std::rotate(this->address_regs.rbegin(), this->address_regs.rbegin() + 1, this->address_regs.rend());
+  this->address_regs[0] = address;
 }
 
 Packet Decoder::decodeExtensionPacket() {
