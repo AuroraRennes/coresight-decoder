@@ -135,7 +135,6 @@ libcsdec_result_t libcsdec_run_edge(const libcsdec_t libcsdec,
     return covert_result_type(result);
   }
   catch(const std::exception& e) {
-    // Maybe save trace_data for debug decoder?
     std::cerr << "Decoder throw exception"<< std::endl;
     return LIBCSDEC_ERROR;
   }

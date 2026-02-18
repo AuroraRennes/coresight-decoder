@@ -15,6 +15,9 @@
 #include "trace.hpp"
 #include "utils.hpp"
 
+#include <csignal>
+#include <cstdlib>
+ 
 void Process::reset(std::vector<MemoryMap> &&memory_maps,
                     const std::uint8_t target_trace_id) {
   this->data.bitmap.reset();
@@ -70,10 +73,16 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
                   << std::endl;
         return ProcessResultType::PROCESS_ERROR_TRACE_DATA_INCOMPLETE;
       }
-
+      case PacketType::ETM4_ADDR_MATCH:
       case PacketType::ETM4_PKT_I_ADDR_S_IS0:
+      case PacketType::ETM4_PKT_I_ADDR_S_IS1:
       case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_32IS1:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_64IS1:
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS0:
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS1:
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         this->decoder.update_address_regs(packet.addr);
         const std::optional<Location> optional_start_location =
@@ -161,10 +170,16 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
 #endif
         break;
       }
-
+      case PacketType::ETM4_ADDR_MATCH:
       case PacketType::ETM4_PKT_I_ADDR_S_IS0:
+      case PacketType::ETM4_PKT_I_ADDR_S_IS1:
       case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_32IS1:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_64IS1:
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS0:
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS1:
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         this->decoder.update_address_regs(packet.addr);
         // An address packet is generated in the following three cases:
@@ -241,15 +256,16 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       From: ARM IHI0064H.b, ID101923, page 6-267
       */
       if (packet.type == PacketType::ETM4_PKT_I_ADDR_S_IS0 || 
-          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0) {
+          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 ||
+          packet.type == PacketType::ETM4_PKT_I_ADDR_L_32IS0) {
         this->decoder.state = DecodeState::EXCEPTION_ADDR2;
       }
       break;
     }
 
     case DecodeState::EXCEPTION_ADDR2: {
-      if (packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0 ||
-          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0) {
+      if (packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0 || packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1 ||
+          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 || packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1) {
         this->decoder.state = DecodeState::TRACE;
       }
       break;
@@ -452,10 +468,16 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
         this->ctx_en_bits_len += size;
         break;
       }
-
+      case PacketType::ETM4_ADDR_MATCH:
       case PacketType::ETM4_PKT_I_ADDR_S_IS0:
+      case PacketType::ETM4_PKT_I_ADDR_S_IS1:
       case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_32IS1:
       case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
+      case PacketType::ETM4_PKT_I_ADDR_L_64IS1:
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS0:
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS1:
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1: 
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         const std::optional<Location> optional_target_location =
             getLocation(this->memory_maps, packet.addr);
@@ -503,14 +525,14 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
     }
 
     case DecodeState::EXCEPTION_ADDR1: {
-      if (packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0) {
+      if (packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 || packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1) {
         this->decoder.state = DecodeState::EXCEPTION_ADDR2;
       }
       break;
     }
 
     case DecodeState::EXCEPTION_ADDR2: {
-      if (packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0) {
+      if (packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 || packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1) {
         this->decoder.state = DecodeState::TRACE;
       }
       break;
@@ -519,7 +541,11 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
     case DecodeState::WAIT_ADDR_AFTER_TRACE_ON: {
       if (packet.type == PacketType::ETM4_PKT_I_ADDR_S_IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 ||
-          packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0) {
+          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1 ||
+          packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS0 ||
+          packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS1 ||
+          packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0 ||
+          packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1) {
         this->decoder.state = DecodeState::TRACE;
       }
       break;
