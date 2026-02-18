@@ -17,6 +17,10 @@ Packet Decoder::decodePacket() {
   Packet result{};
 
   switch (header) {
+  // Long Address 64-bit IS1 Long 0b10011110  
+  case 0b10011110:
+    result = this->decodeAddressLong64IS1Packet();
+    break;
   // Extension packet header: 0b00000000
   case 0b00000000:
     result = this->decodeExtensionPacket();
@@ -54,8 +58,17 @@ Packet Decoder::decodePacket() {
   
   // Exact Match Address packet header: 0b10010000 to 0b10010010
   case 0b10010000 ... 0b10010010:
-    std::cout << "PACKET: Exact Match Address" << std::endl;
-    result = {PacketType::PKT_UNKNOWN, 1, 0, 0, 0};
+    result = decodeExactMatchAddressPacket();
+    break;
+
+  // Address with Context 32-bit IS0 Long
+  case 0b10000010:
+    result = this->decodeAddressLong32IS0WithContextPacket();
+    break;
+
+  // Address with Context 32-bit IS1 Long
+  case 0b10000011:
+    result = this->decodeAddressLong32IS1WithContextPacket();
     break;
 
   // 64-bit IS0 long Address and Context packet header: 0b10000101
@@ -63,14 +76,29 @@ Packet Decoder::decodePacket() {
     result = this->decodeAddressLong64IS0WithContextPacket();
     break;
 
+  // Address with Context 64-bit IS1 Long packet header: 0b10000110
+  case 0b10000110:
+    result = this->decodeAddressLong64IS1WithContextPacket();
+    break;
+
   // IS0 Short Address packet header: 0b10010101
   case 0b10010101:
     result = this->decodeAddressShortIS0Packet();
     break;
 
+  // IS0 Short Address packet header: 0b10010110
+  case 0b10010110:
+    result = this->decodeAddressShortIS1Packet();
+    break;
+
   // 32-bit IS0 long address packet header: 0b10011010
   case 0b10011010:
     result = this->decodeAddressLong32IS0Packet();
+    break;
+
+  // 32-bit IS1 long address packet header: 0b10011011
+  case 0b10011011:
+    result = this->decodeAddressLong32IS1Packet();
     break;
 
   // 64-bit IS0 long Address packet header: 0b10011101
@@ -116,6 +144,10 @@ Packet Decoder::decodePacket() {
   // Atom 3 packet header: 0b11111xxx
   case 0b11111000 ... 0b11111111:
     result = this->decodeAtomF3Packet();
+    break;
+
+  case 0b01110001 ... 0b01111111:
+    result = {PacketType::ETM4_PKT_EVENT, 1, 0, 0, 0};
     break;
 
   default:
@@ -322,24 +354,77 @@ Packet Decoder::decodeAddressShortIS0Packet() {
   return packet;
 }
 
-Packet Decoder::decodeAddressLong32IS0Packet(){
-const std::size_t rest_data_size =
-    this->trace_data.size() - this->trace_data_offset;
-    // Header is correct, but packet size is incomplete.
-    if (rest_data_size < 5) {
-      return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
-    }
-    uint64_t masks = 0xffffffff;  
-    // trace_data[this->trace_data_offset] is header
-    uint32_t address = ((uint32_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 2 |
-        ((uint32_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 9 |
-        ((uint32_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
-        ((uint32_t)this->trace_data[this->trace_data_offset + 4]) << 24;
+Packet Decoder::decodeAddressShortIS1Packet(){
+   const std::size_t rest_data_size =
+      this->trace_data.size() - this->trace_data_offset;
 
-    uint64_t prev_address = this->address_reg;
-    this->address_reg = (prev_address & ~masks ) | (address & masks);
-    Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_32IS0, 5, 0, 0, this->address_reg};
-    return packet;
+  if (rest_data_size < 2) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+
+  uint64_t address = this->address_reg;
+  address = address & ~0x1FF;
+  address =
+      address | ((this->trace_data[this->trace_data_offset + 1] & 0x7F) << 1);
+
+  bool c = (this->trace_data[this->trace_data_offset + 1] & 0b10000000) ? true
+                                                                        : false;
+  std::size_t packet_size = c ? 3 : 2;
+
+  // Header is correct, but packet size is incomplete.
+  if (rest_data_size < packet_size) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+
+  if (c) {
+    address = address & ~0x1FE00;
+    address = address | (this->trace_data[this->trace_data_offset + 2] << 8);
+  }
+
+  this->address_reg = address;
+
+  const Packet packet = {
+      PacketType::ETM4_PKT_I_ADDR_S_IS1, packet_size, 0, 0, address,
+  };
+  return packet;
+}
+
+Packet Decoder::decodeAddressLong32IS0Packet(){
+  const std::size_t rest_data_size = this->trace_data.size() - this->trace_data_offset;
+  // Header is correct, but packet size is incomplete.
+  if (rest_data_size < 5) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+  uint64_t masks = 0xffffffff;  
+  // trace_data[this->trace_data_offset] is header
+  uint32_t address = ((uint32_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 2 |
+      ((uint32_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 9 |
+      ((uint32_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
+      ((uint32_t)this->trace_data[this->trace_data_offset + 4]) << 24;
+
+  uint64_t prev_address = this->address_reg;
+  this->address_reg = (prev_address & ~masks ) | (address & masks);
+  Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_32IS0, 5, 0, 0, this->address_reg};
+  return packet;
+}
+
+Packet Decoder::decodeAddressLong32IS1Packet(){
+  const std::size_t rest_data_size = this->trace_data.size() - this->trace_data_offset;
+  // Header is correct, but packet size is incomplete.
+  if (rest_data_size < 5) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+  uint64_t masks = 0xffffffff;  
+  // trace_data[this->trace_data_offset] is header
+  uint32_t address = ((uint32_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 1 |
+      ((uint32_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 8 |
+      ((uint32_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
+      ((uint32_t)this->trace_data[this->trace_data_offset + 4]) << 24;
+
+  uint64_t prev_address = this->address_reg;
+  this->address_reg = (prev_address & ~masks ) | (address & masks);
+  Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_32IS1, 5, 0, 0, this->address_reg};
+  return packet;
 }
 
 Packet Decoder::decodeAddressLong64IS0Packet() {
@@ -364,6 +449,148 @@ Packet Decoder::decodeAddressLong64IS0Packet() {
   this->address_reg = address;
 
   Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_64IS0, 9, 0, 0, address};
+  return packet;
+}
+
+Packet Decoder::decodeAddressLong64IS1Packet() {
+  const std::size_t rest_data_size = this->trace_data.size() - this->trace_data_offset;
+  // Header is correct, but packet size is incomplete.
+  if (rest_data_size < 9) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+
+  // trace_data[this->trace_data_offset] is header
+  const uint64_t address =
+      ((uint64_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 1 |
+      ((uint64_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 8 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 4]) << 24 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 5]) << 32 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 6]) << 40 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 7]) << 48 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 8]) << 56;
+
+  this->address_reg = address;
+
+  Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_64IS1, 9, 0, 0, address};
+  return packet;
+}
+
+Packet Decoder::decodeAddressLong32IS0WithContextPacket(){
+  const std::size_t rest_data_size = this->trace_data.size() - this->trace_data_offset;
+  // Header is correct, but packet size is incomplete.
+  if (rest_data_size < 10) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+
+  const uint64_t address =
+      ((uint64_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 2 |
+      ((uint64_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 9 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 4]) << 24;
+
+  // Indicates whether the Virtual context identifier section is present in the
+  // packet.
+  const bool has_virtual_context =
+      (this->trace_data[this->trace_data_offset + 5] & 0b01000000) ? true
+                                                                   : false;
+  // Indicates whether the Context ID section is present in the packet.
+  const bool has_context_id =
+      (this->trace_data[this->trace_data_offset + 5] & 0b10000000) ? true
+                                                                   : false;
+
+  const std::size_t context_packet_size = (has_virtual_context and has_context_id) ? 9 : (has_virtual_context or has_context_id) ? 5 : 1;
+
+  // There is not enough payload following the information byte.
+  if (rest_data_size < 5 + context_packet_size) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+
+  address_reg = address;
+
+  const Packet packet = {PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS0,
+                         5 + context_packet_size, 0, 0, address};
+  return packet;
+}
+
+Packet Decoder::decodeAddressLong32IS1WithContextPacket(){
+  const std::size_t rest_data_size = this->trace_data.size() - this->trace_data_offset;
+  // Header is correct, but packet size is incomplete.
+  if (rest_data_size < 10) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+
+  const uint64_t address =
+      ((uint64_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 1 |
+      ((uint64_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 8 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 4]) << 24;
+
+  // Indicates whether the Virtual context identifier section is present in the
+  // packet.
+  const bool has_virtual_context =
+      (this->trace_data[this->trace_data_offset + 5] & 0b01000000) ? true
+                                                                   : false;
+  // Indicates whether the Context ID section is present in the packet.
+  const bool has_context_id =
+      (this->trace_data[this->trace_data_offset + 5] & 0b10000000) ? true
+                                                                   : false;
+
+  const std::size_t context_packet_size = (has_virtual_context and has_context_id) ? 9 : (has_virtual_context or has_context_id) ? 5 : 1;
+
+  // There is not enough payload following the information byte.
+  if (rest_data_size < 5 + context_packet_size) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+
+  address_reg = address;
+
+  const Packet packet = {PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS1,
+                         5 + context_packet_size, 0, 0, address};
+  return packet;
+}
+
+Packet Decoder::decodeAddressLong64IS1WithContextPacket(){
+  const std::size_t rest_data_size = this->trace_data.size() - this->trace_data_offset;
+  // Header is correct, but packet size is incomplete.
+  if (rest_data_size < 10) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+
+  const uint64_t address =
+      ((uint64_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 1 |
+      ((uint64_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 8 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 4]) << 24 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 5]) << 32 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 6]) << 40 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 7]) << 48 |
+      ((uint64_t)this->trace_data[this->trace_data_offset + 8]) << 56;
+
+  // Indicates whether the Virtual context identifier section is present in the
+  // packet.
+  const bool has_virtual_context =
+      (this->trace_data[this->trace_data_offset + 9] & 0b01000000) ? true
+                                                                   : false;
+  // Indicates whether the Context ID section is present in the packet.
+  const bool has_context_id =
+      (this->trace_data[this->trace_data_offset + 9] & 0b10000000) ? true
+                                                                   : false;
+
+  const std::size_t context_packet_size =
+      (has_virtual_context and has_context_id)
+          ? 9
+          : (has_virtual_context or has_context_id) ? 5 : 1;
+
+  // There is not enough payload following the information byte.
+  if (rest_data_size < 9 + context_packet_size) {
+    return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
+  }
+
+  address_reg = address;
+
+  const Packet packet = {PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1,
+                         9 + context_packet_size, 0, 0, address};
   return packet;
 }
 
@@ -411,6 +638,26 @@ Packet Decoder::decodeAddressLong64IS0WithContextPacket() {
                          9 + context_packet_size, 0, 0, address};
   return packet;
 }
+
+Packet Decoder::decodeExactMatchAddressPacket(){
+  std::uint8_t  header = this->trace_data[this->trace_data_offset];
+  Packet packet;
+  // The QE field indicates the queue entry that contains the exact match
+  switch(header & 0b11){
+    case 0b00:
+      packet = {PacketType::ETM4_ADDR_MATCH, 1, 0, 0, address_regs[0]};
+      break;
+    case 0b01:
+      packet = {PacketType::ETM4_ADDR_MATCH, 1, 0, 0, address_regs[1]};
+      break;
+    case 0b10:
+      packet = {PacketType::ETM4_ADDR_MATCH, 1, 0, 0, address_regs[2]};
+      break;
+  }   
+  return packet;
+}
+
+
 
 Packet Decoder::decodeAtomF1Packet() {
   const std::uint8_t data = this->trace_data[this->trace_data_offset];
@@ -569,16 +816,42 @@ std::string Packet::toString() const {
     stream << "ETM4_PKT_I_ADDR_S_IS0 Addr=" << std::hex << "0x" << this->addr;
     break;
 
+  case PacketType::ETM4_PKT_I_ADDR_S_IS1:
+    stream << "ETM4_PKT_I_ADDR_S_IS1 Addr=" << std::hex << "0x" << this->addr;
+    break;
+
   case PacketType::ETM4_PKT_I_ADDR_L_32IS0:
     stream << "ETM4_PKT_I_ADDR_L_32IS0 Addr=" << std::hex << "0x" << this->addr;
+    break;
+
+  case PacketType::ETM4_PKT_I_ADDR_L_32IS1:
+    stream << "ETM4_PKT_I_ADDR_L_32IS1 Addr=" << std::hex << "0x" << this->addr;
     break;
 
   case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
     stream << "ETM4_PKT_I_ADDR_L_64IS0 Addr=" << std::hex << "0x" << this->addr;
     break;
 
+  case PacketType::ETM4_PKT_I_ADDR_L_64IS1:
+    stream << "ETM4_PKT_I_ADDR_L_64IS1 Addr=" << std::hex << "0x" << this->addr;
+    break;
+
+
+  case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS0:
+    stream << "ETM4_PKT_I_ADDR_CTXT_L_32IS0 Addr=" << std::hex << "0x" << this->addr;
+    break;
+
+  case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS1:
+    stream << "ETM4_PKT_I_ADDR_CTXT_L_32IS1 Addr=" << std::hex << "0x" << this->addr;
+    break;
+
   case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0:
     stream << "ETM4_PKT_I_ADDR_CTXT_L_64IS0 Addr=" << std::hex << "0x"
+           << this->addr;
+    break;
+
+   case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1:
+   stream << "ETM4_PKT_I_ADDR_CTXT_L_64IS1 Addr=" << std::hex << "0x"
            << this->addr;
     break;
 
@@ -618,6 +891,15 @@ std::string Packet::toString() const {
 
   case PacketType::ETM4_PKT_I_OVERFLOW:
     stream << "ETM4_PKT_I_OVERFLOW";
+    break;
+
+  case PacketType::ETM4_PKT_EVENT:
+    stream << "ETM4_PKT_EVENT";
+    break;
+
+  case PacketType::ETM4_ADDR_MATCH:
+    stream << "ETM4_EXACT_MATCH_ADDR Addr=" << std::hex << "0x"
+          << this->addr;
     break;
 
   case PacketType::PKT_UNKNOWN:
