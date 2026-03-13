@@ -17,6 +17,8 @@
 #include "process.hpp"
 #include "utils.hpp"
 
+extern bool need_save_insn_flow;
+
 void usage(const char *argv0) {
   std::cerr << "Usage: " << argv0 << " "
             << "[trace_data_filename] [trace_id] [binary_file_num] "
@@ -45,7 +47,7 @@ int main(int argc, char const *argv[]) {
     usage(argv[0]);
     std::exit(EXIT_FAILURE);
   }
-
+  need_save_insn_flow = std::getenv("INSN_SAVE");
   const std::string trace_data_filename = argv[1];
   const std::uint8_t trace_id = std::stol(argv[2], nullptr, 16);
   const int binary_file_num = std::stol(argv[3], nullptr, 10);
@@ -90,8 +92,7 @@ int main(int argc, char const *argv[]) {
     for (int id = 0; id < binary_file_num; ++id) {
       const std::string path = argv[4 + id * 3];
       std::vector<std::uint8_t> data = readBinaryFile(path);
-
-      memory_images.emplace_back(MemoryImage(std::move(data), (std::size_t)id));
+      memory_images.emplace_back(MemoryImage(std::move(data), (std::size_t)id, basename(argv[4 + id * 3])));
     }
   }
 

@@ -24,7 +24,7 @@
 #include "libcsdec.h"
 
 libcsdec_result_t covert_result_type(ProcessResultType result);
-
+extern bool need_save_insn_flow;
 /**
     Initializes persistent objects for edge coverage mode and returns the
     pointer.
@@ -52,7 +52,7 @@ libcsdec_init_edge(void *bitmap_addr, const int bitmap_size,
           reinterpret_cast<std::uint8_t *>(libcsdec_memory_image[id].data) + 0,
           reinterpret_cast<std::uint8_t *>(libcsdec_memory_image[id].data) +
               libcsdec_memory_image[id].size);
-      memory_images.emplace_back(MemoryImage(std::move(data), id));
+      memory_images.emplace_back(MemoryImage(std::move(data), id, libcsdec_memory_image[id].path));
     }
   }
 
@@ -61,7 +61,7 @@ libcsdec_init_edge(void *bitmap_addr, const int bitmap_size,
       Bitmap(reinterpret_cast<std::uint8_t *>(bitmap_addr),
              static_cast<std::size_t>(bitmap_size)),
       Cache());
-
+  need_save_insn_flow = std::getenv("INSN_SAVE");
   // Release ownership and pass it to the C API side.
   // Therefore, do not free it here.
   return reinterpret_cast<Process *>(process.release());
@@ -183,7 +183,7 @@ libcsdec_init_path(void *bitmap_addr, const int bitmap_size,
           reinterpret_cast<std::uint8_t *>(libcsdec_memory_image[id].data) + 0,
           reinterpret_cast<std::uint8_t *>(libcsdec_memory_image[id].data) +
               libcsdec_memory_image[id].size);
-      memory_images.emplace_back(MemoryImage(std::move(data), id));
+      memory_images.emplace_back(MemoryImage(std::move(data), id, libcsdec_memory_image[id].path));
     }
   }
 

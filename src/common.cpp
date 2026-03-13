@@ -8,11 +8,11 @@
 #include "utils.hpp"
 
 MemoryImage::MemoryImage(std::uint8_t *data, std::size_t data_size,
-                         image_id_t id)
-    : data(std::vector<std::uint8_t>(data + 0, data + data_size)), id(id) {}
+                         image_id_t id, std::string binary_name)
+    : data(std::vector<std::uint8_t>(data + 0, data + data_size)), id(id), binary_name(binary_name) {}
 
-MemoryImage::MemoryImage(binary_data_t &&data, image_id_t id)
-    : data(std::move(data)), id(id) {}
+MemoryImage::MemoryImage(binary_data_t &&data, image_id_t id, std::string binary_name)
+    : data(std::move(data)), id(id), binary_name(binary_name) {}
 
 MemoryMap::MemoryMap(addr_t start_address, addr_t end_address, image_id_t id)
     : start_address(start_address), end_address(end_address), id(id) {}

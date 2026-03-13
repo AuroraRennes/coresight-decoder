@@ -15,9 +15,11 @@
 #error Unsupported capstone version (capstone engine v4 is required)!
 #endif
 
+extern std::vector<std::pair<std::string, uint64_t>> insn_flow;
+extern bool need_save_insn_flow;
 cs_insn *disassembleNextBranchInsn(const csh *handle,
-                                   const std::vector<std::uint8_t> &code,
-                                   const std::uint64_t offset);
+                                  const MemoryImage *memory_image,
+                                  const std::uint64_t offset);
 std::uint64_t getAddressFromInsn(const cs_insn *insn);
 BranchType decodeInstOpecode(const cs_insn *insn);
 
@@ -143,7 +145,7 @@ BranchInsn getNextBranchInsn(const csh &handle, const Location &location,
                              const std::vector<MemoryImage> &memory_images) {
   // Find the first branch instruction after the address indicated by location.
   cs_insn *insn = disassembleNextBranchInsn(
-      &handle, memory_images[location.id].data, location.offset);
+      &handle, &memory_images[location.id], location.offset);
 
   const BranchType type = decodeInstOpecode(insn);
   const addr_t offset = insn->address;
@@ -167,10 +169,10 @@ BranchInsn getNextBranchInsn(const csh &handle, const Location &location,
 
 // https://www.capstone-engine.org/iteration.html
 cs_insn *disassembleNextBranchInsn(const csh *handle,
-                                   const std::vector<std::uint8_t> &code,
+                                   const MemoryImage *memory_image,
                                    const std::uint64_t offset) {
-  const std::uint8_t *code_ptr = &code[0] + offset;
-  std::size_t code_size = code.size() - offset;
+  const std::uint8_t *code_ptr = &memory_image->data[0] + offset;
+  std::size_t code_size = memory_image->data.size()- offset;
 
   // address of first instruction to be disassembled
   std::uint64_t address = offset;
@@ -184,6 +186,9 @@ cs_insn *disassembleNextBranchInsn(const csh *handle,
   while (cs_disasm_iter(*handle, &code_ptr, &code_size, &address, insn)) {
     DEBUG("ADDRESS: 0x%08lx INSTRUCTION_ID: %3d INSTRUCTION: %s %s\n",
           insn->address, insn->id, insn->mnemonic, insn->op_str);
+    if(need_save_insn_flow){
+      insn_flow.push_back(std::pair<std::string, uint64_t>(memory_image->binary_name, insn->address));
+    }
     // analyze disassembled instruction in @insn variable
     // NOTE: @code_ptr, @code_size & @address variables are all updated
     // to point to the next instruction after each iteration.

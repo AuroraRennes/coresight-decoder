@@ -24,9 +24,10 @@ using binary_data_t = std::vector<std::uint8_t>;
 struct MemoryImage {
   const binary_data_t data;
   const image_id_t id;
+  const std::string binary_name;
 
-  MemoryImage(std::uint8_t *data, std::size_t data_size, image_id_t id);
-  MemoryImage(binary_data_t &&data, image_id_t id);
+  MemoryImage(std::uint8_t *data, std::size_t data_size, image_id_t id, std::string binary_name);
+  MemoryImage(binary_data_t &&data, image_id_t id, std::string binary_name);
 };
 
 struct MemoryMap {

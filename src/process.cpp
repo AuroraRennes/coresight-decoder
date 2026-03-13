@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <iostream>
 #include <vector>
+#include <fstream>
 
 #include "cache.hpp"
 #include "common.hpp"
@@ -17,7 +18,10 @@
 
 #include <csignal>
 #include <cstdlib>
- 
+
+std::vector<std::pair<std::string, uint64_t>> insn_flow;
+bool need_save_insn_flow = false;
+
 void Process::reset(std::vector<MemoryMap> &&memory_maps,
                     const std::uint8_t target_trace_id) {
   this->data.bitmap.reset();
@@ -33,7 +37,19 @@ ProcessResultType Process::final() {
   //     Atom packet. return
   //     ProcessResultType::PROCESS_ERROR_TRACE_DATA_INCOMPLETE;
   // }
-
+  if (need_save_insn_flow) {
+    std::ofstream CoverageFile("coverage.txt");
+    if (CoverageFile.is_open()) {
+      std::ios_base::fmtflags f(std::cout.flags());
+      for (auto el : insn_flow) {
+        CoverageFile << el.first << "+" << std::hex << el.second << std::endl;
+      }
+      std::cout.flags(f);
+      CoverageFile.close();
+    } else {
+      std::cerr << "Error with open coverage.txt\n";
+    }
+  }
   return ProcessResultType::PROCESS_SUCCESS;
 }
 

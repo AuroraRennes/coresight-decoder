@@ -38,6 +38,7 @@ if (libcsdec_finish_edge(libcsdec) != LIBCEDEC_SUCCESS) {
     exit(EXIT_FAILURE);
 }
 ```
+In this mode, you can set environment variable `INSN_SAVE=1` to save the instruction execution flow to a file `coverage.txt` under the current directory.
 
 ## Path Coverage
 
