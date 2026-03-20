@@ -479,7 +479,7 @@ Packet Decoder::decodeAddressLong64IS1Packet() {
 Packet Decoder::decodeAddressLong32IS0WithContextPacket(){
   const std::size_t rest_data_size = this->trace_data.size() - this->trace_data_offset;
   // Header is correct, but packet size is incomplete.
-  if (rest_data_size < 10) {
+  if (rest_data_size < 6) {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
 
@@ -516,7 +516,7 @@ Packet Decoder::decodeAddressLong32IS0WithContextPacket(){
 Packet Decoder::decodeAddressLong32IS1WithContextPacket(){
   const std::size_t rest_data_size = this->trace_data.size() - this->trace_data_offset;
   // Header is correct, but packet size is incomplete.
-  if (rest_data_size < 10) {
+  if (rest_data_size < 6) {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
 
