@@ -23,6 +23,7 @@ typedef void *libcsdec_t;
 **/
 struct libcsdec_memory_image {
   void *data;  /**< Binary data of the memory image. */
+  char path[PATH_MAX];
   size_t size; /**< Size of the memory image. */
 };
 

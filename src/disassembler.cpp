@@ -15,9 +15,11 @@
 #error Unsupported capstone version (capstone engine v4 is required)!
 #endif
 
+extern std::vector<std::pair<std::string, uint64_t>> insn_flow;
+extern bool need_save_insn_flow;
 cs_insn *disassembleNextBranchInsn(const csh *handle,
-                                   const std::vector<std::uint8_t> &code,
-                                   const std::uint64_t offset);
+                                  const MemoryImage *memory_image,
+                                  const std::uint64_t offset);
 std::uint64_t getAddressFromInsn(const cs_insn *insn);
 BranchType decodeInstOpecode(const cs_insn *insn);
 
@@ -61,9 +63,75 @@ static const std::uint16_t isb_branch_opcode[] = {
     ARM64_INS_ISB,
 };
 
+// According to the Arm Embedded Trace Macrocell Architecture Specification
+// ETMv4.0 to ETMv4.6 F.1 Branch instructions, a list of branch instructions is
+// as follows. Currently, some instructions are not supported.
+//
+// A32 instruction set, direct branches:
+//     - B
+//     - B<cc> Conditional branch
+//     - BL
+//     - BLX <immed>
+//     - ISB
+//     - WFI
+//     - WFE
+
+//
+// A32 instruction set, indirect branches:
+//     - RFE
+//     - Data processing instructions that modify the PC (ADD, SUB, MOV, AND, ...)
+//     - BX
+//     - BLX <reg>
+//     - BXJ
+//     - LDR or LDRT to the PC
+//     - LDM including the PC
+//     - ERET
+
+bool A32_mode;
+static const std::uint16_t direct_branch_opcode_arm32[] = {
+    // unconditional direct branch
+    ARM_INS_B, // B, B.cond
+    ARM_INS_BL,
+
+};
+
+static const std::uint16_t indirect_branch_opcode_arm32[] = {
+
+    // Branch
+    ARM_INS_BX,
+    ARM_INS_BLX,
+    ARM_INS_ERET,
+    
+    // Load/Store 
+    ARM_INS_POP,    // POP {Rn, pc}   
+    ARM_INS_LDR,    // LDR{cond} pc, [Rn, #imm]
+    ARM_INS_LDM,    // LDM{cond} Rn!, {…, pc}
+    ARM_INS_STM,    // STM{cond} Rn!, {…, pc}
+    ARM_INS_LDREX,  // LDREX{cond} pc, [Rn]
+
+    // data‑processing
+    ARM_INS_ADD,    // ADD{cond} pc, pc, <Rn
+    ARM_INS_SUB,    // SUB{cond} pc, pc, <Rn
+    ARM_INS_MOV,    // MOV{cond} pc, <Rn
+    ARM_INS_AND,    // AND{cond} pc, pc, <Rn>
+    ARM_INS_ORR,    // ORR{cond} pc, pc, <Rn>
+    ARM_INS_EOR,    // EOR{cond} pc, pc, <Rn>
+    ARM_INS_BIC,    // BIC{cond} pc, pc, <Rn>
+    ARM_INS_RSB,    // RSB{cond} pc, pc, <Rn>
+    ARM_INS_RSC,    // RSC{cond} pc, pc, <Rn>
+};
+
+static const std::uint16_t isb_branch_opcode_arm32[] = {
+    ARM_INS_ISB,
+};
+
 void disassembleInit(csh *handle) {
   // Initialize capstone
-  cs_err err = cs_open(CS_ARCH_ARM64, CS_MODE_ARM, handle);
+ 
+  A32_mode = std::getenv("ARM32");
+  cs_arch arch = A32_mode ? CS_ARCH_ARM : CS_ARCH_ARM64;
+  cs_err err = cs_open(arch, CS_MODE_ARM, handle);
+  
   if (err != CS_ERR_OK) {
     std::cerr << "Failed on cs_open() with error returned: " << err
               << std::endl;
@@ -77,7 +145,7 @@ BranchInsn getNextBranchInsn(const csh &handle, const Location &location,
                              const std::vector<MemoryImage> &memory_images) {
   // Find the first branch instruction after the address indicated by location.
   cs_insn *insn = disassembleNextBranchInsn(
-      &handle, memory_images[location.id].data, location.offset);
+      &handle, &memory_images[location.id], location.offset);
 
   const BranchType type = decodeInstOpecode(insn);
   const addr_t offset = insn->address;
@@ -86,9 +154,9 @@ BranchInsn getNextBranchInsn(const csh &handle, const Location &location,
       (type == BranchType::DIRECT_BRANCH)
           ? getAddressFromInsn(insn)
           : (type == BranchType::ISB_BRANCH) ? insn->address + insn->size : 0;
-  const addr_t not_taken_offset =
-      (type == BranchType::DIRECT_BRANCH) ? offset + insn->size : 0;
-
+  const addr_t not_taken_offset = offset + insn->size;
+      //(type == BranchType::DIRECT_BRANCH) ? offset + insn->size : 0;
+      
   const BranchInsn branch_insn{
       type, offset, taken_offset, not_taken_offset, location.id,
   };
@@ -101,10 +169,10 @@ BranchInsn getNextBranchInsn(const csh &handle, const Location &location,
 
 // https://www.capstone-engine.org/iteration.html
 cs_insn *disassembleNextBranchInsn(const csh *handle,
-                                   const std::vector<std::uint8_t> &code,
+                                   const MemoryImage *memory_image,
                                    const std::uint64_t offset) {
-  const std::uint8_t *code_ptr = &code[0] + offset;
-  std::size_t code_size = code.size() - offset;
+  const std::uint8_t *code_ptr = &memory_image->data[0] + offset;
+  std::size_t code_size = memory_image->data.size()- offset;
 
   // address of first instruction to be disassembled
   std::uint64_t address = offset;
@@ -118,6 +186,9 @@ cs_insn *disassembleNextBranchInsn(const csh *handle,
   while (cs_disasm_iter(*handle, &code_ptr, &code_size, &address, insn)) {
     DEBUG("ADDRESS: 0x%08lx INSTRUCTION_ID: %3d INSTRUCTION: %s %s\n",
           insn->address, insn->id, insn->mnemonic, insn->op_str);
+    if(need_save_insn_flow){
+      insn_flow.push_back(std::pair<std::string, uint64_t>(memory_image->binary_name, insn->address));
+    }
     // analyze disassembled instruction in @insn variable
     // NOTE: @code_ptr, @code_size & @address variables are all updated
     // to point to the next instruction after each iteration.
@@ -166,27 +237,108 @@ std::uint64_t getAddressFromInsn(const cs_insn *insn) {
       std::stol(insn->op_str + address_index, nullptr, 16);
   return address;
 }
+ 
+bool is_a32_branch(const cs_insn *insn)
+{
+    const uint8_t *b = insn->bytes;
+    uint32_t w = (uint32_t)b[0] |
+                 ((uint32_t)b[1] << 8) |
+                 ((uint32_t)b[2] << 16) |
+                 ((uint32_t)b[3] << 24);
+
+    if (((w >> 12) & 0xF) == 15 && ((w & 0x0C000000) == 0)) // check insn is data-processing and Rd is pc
+    {
+      /*
+      // data‑processing
+      ARM_INS_ADD, // ADD{cond} pc, pc, <Rn
+      ARM_INS_SUB, // SUB{cond} pc, pc, <Rn
+      ARM_INS_MOV, // MOV{cond} pc, <Rn
+      ARM_INS_AND, // AND{cond} pc, pc, <Rn>
+      ARM_INS_ORR, // ORR{cond} pc, pc, <Rn>
+      ARM_INS_EOR, // EOR{cond} pc, pc, <Rn>
+      ARM_INS_BIC, // BIC{cond} pc, pc, <Rn>
+      ARM_INS_RSB, // RSB{cond} pc, pc, <Rn>
+      ARM_INS_RSC, // RSC{cond} pc, pc, <Rn>
+      */
+      return true;
+    }
+
+    if ((w & 0x0E500000) == 0x04100000 || (w & 0x0E500010) == 0x06100000) // check insn is LDR
+    {
+        if (((w >> 12) & 0xf) == 15) // check PC
+        {
+          /*
+          ARM_INS_POP, // POP {Rn, pc} 
+          ARM_INS_LDR, // LDR{cond} pc, [Rn, #imm] ldrls pc, [pc, r2, lsl #2]
+          */
+          return true;
+        }
+    }
+    if ((w & 0x0E000000) == 0x08000000) // check insn is LDM
+    {
+        if ((w & 0xFFFF) & (1 << 15)) // check PC
+        {
+          /*
+          ARM_INS_LDM, // LDM{cond} Rn!, {…, pc}
+          */
+          return true;
+        }
+    }
+    return false;
+    /* TODO:
+            - STM{cond} Rn!, {…, pc}
+            - LDREX{cond} pc, [Rn]
+    */
+}
 
 BranchType decodeInstOpecode(const cs_insn *insn) {
-  for (const std::uint16_t opcode : direct_branch_opcode) {
-    if (insn->id == opcode) {
-      return BranchType::DIRECT_BRANCH;
+  if(A32_mode) {
+    
+    for (const std::uint16_t opcode : direct_branch_opcode_arm32) {
+      if (insn->id == opcode) {
+        return BranchType::DIRECT_BRANCH;
+      }
     }
-  }
 
-  for (const std::uint16_t opcode : indirect_branch_opcode) {
-    if (insn->id == opcode) {
-      return BranchType::INDIRECT_BRANCH;
+    for (const std::uint16_t opcode : indirect_branch_opcode_arm32) {
+      if (insn->id == opcode) {
+        if (opcode == ARM_INS_BX || opcode == ARM_INS_BLX || opcode == ARM_INS_ERET || is_a32_branch(insn)) {
+          return BranchType::INDIRECT_BRANCH;
+        }
+        return BranchType::NOT_BRANCH;
+      }
     }
-  }
 
-  for (const std::uint16_t opcode : isb_branch_opcode) {
-    if (insn->id == opcode) {
-      return BranchType::ISB_BRANCH;
+    for (const std::uint16_t opcode : isb_branch_opcode_arm32) {
+      if (insn->id == opcode) {
+        return BranchType::ISB_BRANCH;
+      }
     }
-  }
 
-  return BranchType::NOT_BRANCH;
+    return BranchType::NOT_BRANCH;
+  }
+  else 
+  {
+    for (const std::uint16_t opcode : direct_branch_opcode) {
+      if (insn->id == opcode) {
+        return BranchType::DIRECT_BRANCH;
+      }
+    }
+
+    for (const std::uint16_t opcode : indirect_branch_opcode) {
+      if (insn->id == opcode) {
+        return BranchType::INDIRECT_BRANCH;
+      }
+    }
+
+    for (const std::uint16_t opcode : isb_branch_opcode) {
+      if (insn->id == opcode) {
+        return BranchType::ISB_BRANCH;
+      }
+    }
+
+    return BranchType::NOT_BRANCH;
+  }
 }
 
 // Check the version of the Capstone library.
