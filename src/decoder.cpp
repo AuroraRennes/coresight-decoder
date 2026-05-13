@@ -180,6 +180,9 @@ Packet Decoder::decodeExtensionPacket() {
 
   // Overflow packet
   if (this->trace_data[this->trace_data_offset + 1] == 0x5) {
+    // Address packets may be missed due to a break in the route, 
+    // so it is necessary to reset the saved addresses.
+    this->address_regs.fill(0);
     return Packet{PacketType::ETM4_PKT_I_OVERFLOW, 2, 0, 0, 0};
   }
 
