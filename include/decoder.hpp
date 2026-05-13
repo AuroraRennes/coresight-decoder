@@ -79,12 +79,11 @@ struct Decoder {
   std::size_t trace_data_offset;
   DecodeState state;
 
-  std::uint64_t address_reg;
   std::array<std::uint64_t, 3> address_regs = {0,0,0};
 
   Packet decodePacket();
   void reset();
-  void update_address_regs(uint64_t);
+  void updateAddressRegs(uint64_t);
 
 private:
   Packet decodeExtensionPacket();
