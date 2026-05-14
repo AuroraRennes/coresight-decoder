@@ -471,7 +471,9 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
                                       decoder.trace_data);
 
   const std::size_t size = this->decoder.trace_data.size();
-
+  size_t addr_max = 5;
+  size_t atm_max = 5;
+  size_t addr_cnt = 0, atm_cnt = 0;
   while (this->decoder.trace_data_offset < size) {
     const Packet packet = this->decoder.decodePacket();
     DEBUG("%s\n", packet.toString().c_str());
@@ -496,12 +498,19 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_ATOM_F5:
       case PacketType::ETM4_PKT_I_ATOM_F6: {
         // Convert EN bits to binary string.
-        std::size_t size =
-            std::min(packet.en_bits_len, MAX_ATOM_LEN - this->ctx_en_bits_len);
-        for (std::size_t i = 0; i < size; ++i) {
-          this->ctx_en_bits += (packet.en_bits & (1 << i)) ? '1' : '0';
+        if(atm_cnt<=atm_max)  {
+            std::size_t size = std::min(packet.en_bits_len, MAX_ATOM_LEN - this->ctx_en_bits_len);
+            for (std::size_t i = 0; i < size; ++i) {
+              this->ctx_en_bits += (packet.en_bits & (1 << i)) ? '1' : '0';
+            }
+            this->ctx_en_bits_len += size;
+            if (this->ctx_en_bits_len != 0) {
+              this->ctx_hash = hashString(this->ctx_hash, this->ctx_en_bits);
+              this->ctx_en_bits = "";
+              this->ctx_en_bits_len = 0;
+            }
+            atm_cnt++;
         }
-        this->ctx_en_bits_len += size;
         break;
       }
       case PacketType::ETM4_ADDR_MATCH:
@@ -518,27 +527,30 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
         this->decoder.updateAddressRegs(packet.addr);
         const std::optional<Location> optional_target_location =
             getLocation(this->memory_maps, packet.addr);
-        if (not optional_target_location.has_value()) {
-        if (this->ctx_en_bits_len != 0) {
-          DEBUG("Update hash by EN bits: %s\n", this->ctx_en_bits.c_str());
-          this->ctx_hash = hashString(this->ctx_hash, ctx_en_bits);
+        if (not optional_target_location.has_value()) { 
+          if (this->ctx_en_bits_len != 0) {
+          this->ctx_hash = hashString(this->ctx_hash, this->ctx_en_bits);
           this->ctx_en_bits = "";
           this->ctx_en_bits_len = 0;
         }
 
-        DEBUG("Update hash by Address: (%ld, 0x%lx)\n", target_location.id,
-              target_location.offset);
-        this->ctx_hash = hashLocation(this->ctx_hash, target_location);
-
-        // XXX: We experimentally found that updating the bitmap
-        // only when the address count hits MAX_ADDRESS_LEN
-        // does not increase coverage. We modified the algorithm
-        // to update the bitmap every Address packet processing.
         std::size_t index = mapHash(this->ctx_hash, this->bitmap.size);
         this->bitmap.data[index]++;
-
-        // Reset hash.
+        addr_cnt = 0;
         this->ctx_hash = 0;
+        break;
+        }
+
+        this->ctx_hash = hashLocation(this->ctx_hash,  optional_target_location.value());
+        addr_cnt++;
+        atm_cnt = 0;
+        if(addr_cnt >= addr_max)  {
+          std::size_t index = mapHash(this->ctx_hash, this->bitmap.size);
+          this->bitmap.data[index]++;
+          addr_cnt = 0;
+          this->ctx_hash = 0;
+          this->ctx_hash = hashLocation(this->ctx_hash,  optional_target_location.value());
+        }
         break;
       }
 
@@ -562,7 +574,7 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_32IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 || 
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1) {
-        this->decoder.state = DecodeState::EXCEPTION_ADDR2;
+          this->decoder.state = DecodeState::EXCEPTION_ADDR2;
       }
       this->decoder.updateAddressRegs(packet.addr);
       break;
@@ -575,7 +587,7 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1) {
-        this->decoder.state = DecodeState::TRACE;
+          this->decoder.state = DecodeState::TRACE;
       }
       this->decoder.updateAddressRegs(packet.addr);
       break;
