@@ -64,7 +64,8 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
   const std::size_t size = this->decoder.trace_data.size();
   while (this->decoder.trace_data_offset < size) {
     const Packet packet = this->decoder.decodePacket();
-    DEBUG("%d/%d, state:%d, %s\n",decoder.trace_data_offset , size , this->decoder.state, packet.toString().c_str());
+    DEBUG("%zu/%zu, state:%d, %s\n", decoder.trace_data_offset, size,
+          static_cast<int>(this->decoder.state), packet.toString().c_str());
 
     // The length of the packet data is insufficient and decoding cannot be
     // performed correctly at this time. In this case, the decoding process is
