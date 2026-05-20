@@ -15,6 +15,10 @@ enum class PacketType {
 
   // Exceptions
   ETM4_PKT_I_EXCEPT,
+  ETM4_PKT_I_EXCEPT_IRQ,
+  ETM4_PKT_I_EXCEPT_FIQ,
+  ETM4_PKT_I_EXCEPT_INST_FAULT,
+  ETM4_PKT_I_EXCEPT_DATA_FAULT,
 
   // Address and Context
   ETM4_PKT_I_CTXT,

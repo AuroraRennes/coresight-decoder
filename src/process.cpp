@@ -21,13 +21,14 @@
 
 std::vector<std::pair<std::string, uint64_t>> insn_flow;
 bool need_save_insn_flow = false;
-bool exception_state = false;
+
 void Process::reset(std::vector<MemoryMap> &&memory_maps,
                     const std::uint8_t target_trace_id) {
   this->data.bitmap.reset();
   this->deformatter.reset(target_trace_id);
   this->decoder.reset();
   this->state.reset(std::move(memory_maps));
+  this->exception_state = false;
 }
 
 ProcessResultType Process::final() {
@@ -101,12 +102,12 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS1:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
-        if(exception_state) {
-          // Expecting the atom package
+        this->decoder.updateAddressRegs(packet.addr);
+        if(this->exception_state) {
+          // Expecting the atom packet
           this->decoder.state = DecodeState::TRACE;
           break;
         }
-        this->decoder.updateAddressRegs(packet.addr);
         const std::optional<Location> optional_start_location =
             getLocation(this->state.memory_maps, packet.addr);
 
@@ -152,8 +153,8 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_ATOM_F4:
       case PacketType::ETM4_PKT_I_ATOM_F5:
       case PacketType::ETM4_PKT_I_ATOM_F6: {
-        if(exception_state) {
-          exception_state = false;
+        if(this->exception_state) {
+          this->exception_state = false;
         }
         // When processing an atom packet, there is an unprocessed indirect
         // branch instruction. If there is an unprocessed indirect branch
@@ -213,7 +214,7 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         this->decoder.updateAddressRegs(packet.addr);
-        if(exception_state)
+        if(this->exception_state)
           break;
         // An address packet is generated in the following three cases:
         //   1. Generated to indicate the trace start address at the start of
@@ -253,9 +254,14 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       // shows the address to return after the exception, and the second shows
       // the address where execution actually resumed after the exception.
       // Therefore, the user space trace ignores these two address packets.
-      case PacketType::ETM4_PKT_I_EXCEPT: {
+      case PacketType::ETM4_PKT_I_EXCEPT: 
+      case PacketType::ETM4_PKT_I_EXCEPT_IRQ:
+      case PacketType::ETM4_PKT_I_EXCEPT_FIQ:
+      case PacketType::ETM4_PKT_I_EXCEPT_INST_FAULT:
+      case PacketType::ETM4_PKT_I_EXCEPT_DATA_FAULT: {
         this->decoder.state = DecodeState::EXCEPTION_ADDR1;
-        exception_state = true;
+        if (packet.type == PacketType::ETM4_PKT_I_EXCEPT_IRQ || packet.type == PacketType::ETM4_PKT_I_EXCEPT_FIQ)
+          this->exception_state = true;  
         break;
       }
 

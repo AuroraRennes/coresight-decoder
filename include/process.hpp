@@ -65,7 +65,7 @@ struct ProcessState {
 struct Process {
   ProcessData data;
   ProcessState state;
-
+  bool exception_state = false;
   Deformatter deformatter;
   Decoder decoder;
 

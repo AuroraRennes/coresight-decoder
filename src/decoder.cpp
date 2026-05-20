@@ -222,6 +222,8 @@ Packet Decoder::decodeTraceInfoPacket() {
   while (this->trace_data[packet_size - 1] & 0b10000000) {
     break;
   }
+  // Trace Info instruction trace packet ARM IHI0064H.b 6-261 
+  this->address_regs.fill(0);
 
   const Packet packet = {
       PacketType::ETM4_PKT_I_TRACE_INFO, packet_size, 0, 0, 0,
@@ -309,15 +311,32 @@ Packet Decoder::decodeExceptionPacket() {
   // in the packet.
   bool c = (this->trace_data[this->trace_data_offset + 1] & 0b10000000) ? true
                                                                         : false;
+  PacketType type;
+  switch((this->trace_data[this->trace_data_offset + 1] >> 1) & 0x1F){
+    case 0b01011:
+      type = PacketType::ETM4_PKT_I_EXCEPT_INST_FAULT;
+      break;
+    case 0b01100:
+      type = PacketType::ETM4_PKT_I_EXCEPT_DATA_FAULT;
+      break;
+    case 0b01110:
+      type = PacketType::ETM4_PKT_I_EXCEPT_IRQ;
+      break;
+    case 0b01111:
+      type = PacketType::ETM4_PKT_I_EXCEPT_FIQ;
+      break;
+    default: 
+      type = PacketType::ETM4_PKT_I_EXCEPT;
+      break;
+  }   
   std::size_t packet_size = c ? 3 : 2;
-  this->updateAddressRegs(0);
   // Header is correct, but packet size is incomplete.
   if (rest_data_size < packet_size) {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
 
   const Packet packet = {
-      PacketType::ETM4_PKT_I_EXCEPT, packet_size, 0, 0, 0,
+      type, packet_size, 0, 0, 0,
   };
   return packet;
 }
@@ -795,6 +814,22 @@ std::string Packet::toString() const {
 
   case PacketType::ETM4_PKT_I_EXCEPT:
     stream << "ETM4_PKT_I_EXCEPT";
+    break;
+
+  case PacketType::ETM4_PKT_I_EXCEPT_DATA_FAULT:
+    stream << "ETM4_PKT_I_EXCEPT_DATA_FAULT";
+    break;
+
+  case PacketType::ETM4_PKT_I_EXCEPT_INST_FAULT:
+    stream << "ETM4_PKT_I_EXCEPT_INST_FAULT";
+    break;
+
+  case PacketType::ETM4_PKT_I_EXCEPT_IRQ:
+    stream << "ETM4_PKT_I_EXCEPT_IRQ";
+    break;
+
+  case PacketType::ETM4_PKT_I_EXCEPT_FIQ:
+    stream << "ETM4_PKT_I_EXCEPT_FIQ";
     break;
 
   case PacketType::ETM4_PKT_I_ADDR_S_IS0:
