@@ -164,7 +164,7 @@ void Decoder::reset() {
   this->state = DecodeState::START;
 }
 
-void Decoder::update_address_regs(uint64_t address){
+void Decoder::updateAddressRegs(uint64_t address){
   std::rotate(this->address_regs.rbegin(), this->address_regs.rbegin() + 1, this->address_regs.rend());
   this->address_regs[0] = address;
 }
@@ -180,6 +180,9 @@ Packet Decoder::decodeExtensionPacket() {
 
   // Overflow packet
   if (this->trace_data[this->trace_data_offset + 1] == 0x5) {
+    // Address packets may be missed due to a break in the route, 
+    // so it is necessary to reset the saved addresses.
+    this->address_regs.fill(0);
     return Packet{PacketType::ETM4_PKT_I_OVERFLOW, 2, 0, 0, 0};
   }
 
@@ -219,6 +222,8 @@ Packet Decoder::decodeTraceInfoPacket() {
   while (this->trace_data[packet_size - 1] & 0b10000000) {
     break;
   }
+  // Trace Info instruction trace packet ARM IHI0064H.b 6-261 
+  this->address_regs.fill(0);
 
   const Packet packet = {
       PacketType::ETM4_PKT_I_TRACE_INFO, packet_size, 0, 0, 0,
@@ -306,15 +311,32 @@ Packet Decoder::decodeExceptionPacket() {
   // in the packet.
   bool c = (this->trace_data[this->trace_data_offset + 1] & 0b10000000) ? true
                                                                         : false;
+  PacketType type;
+  switch((this->trace_data[this->trace_data_offset + 1] >> 1) & 0x1F){
+    case 0b01011:
+      type = PacketType::ETM4_PKT_I_EXCEPT_INST_FAULT;
+      break;
+    case 0b01100:
+      type = PacketType::ETM4_PKT_I_EXCEPT_DATA_FAULT;
+      break;
+    case 0b01110:
+      type = PacketType::ETM4_PKT_I_EXCEPT_IRQ;
+      break;
+    case 0b01111:
+      type = PacketType::ETM4_PKT_I_EXCEPT_FIQ;
+      break;
+    default: 
+      type = PacketType::ETM4_PKT_I_EXCEPT;
+      break;
+  }   
   std::size_t packet_size = c ? 3 : 2;
-
   // Header is correct, but packet size is incomplete.
   if (rest_data_size < packet_size) {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
 
   const Packet packet = {
-      PacketType::ETM4_PKT_I_EXCEPT, packet_size, 0, 0, 0,
+      type, packet_size, 0, 0, 0,
   };
   return packet;
 }
@@ -327,7 +349,7 @@ Packet Decoder::decodeAddressShortIS0Packet() {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
 
-  uint64_t address = this->address_reg;
+  uint64_t address = this->address_regs[0];
   address = address & ~0x1FF;
   address =
       address | ((this->trace_data[this->trace_data_offset + 1] & 0x7F) << 2);
@@ -346,8 +368,6 @@ Packet Decoder::decodeAddressShortIS0Packet() {
     address = address | (this->trace_data[this->trace_data_offset + 2] << 9);
   }
 
-  this->address_reg = address;
-
   const Packet packet = {
       PacketType::ETM4_PKT_I_ADDR_S_IS0, packet_size, 0, 0, address,
   };
@@ -362,7 +382,7 @@ Packet Decoder::decodeAddressShortIS1Packet(){
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
 
-  uint64_t address = this->address_reg;
+  uint64_t address = this->address_regs[0];
   address = address & ~0x1FF;
   address =
       address | ((this->trace_data[this->trace_data_offset + 1] & 0x7F) << 1);
@@ -380,8 +400,6 @@ Packet Decoder::decodeAddressShortIS1Packet(){
     address = address & ~0x1FE00;
     address = address | (this->trace_data[this->trace_data_offset + 2] << 8);
   }
-
-  this->address_reg = address;
 
   const Packet packet = {
       PacketType::ETM4_PKT_I_ADDR_S_IS1, packet_size, 0, 0, address,
@@ -402,9 +420,8 @@ Packet Decoder::decodeAddressLong32IS0Packet(){
       ((uint32_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
       ((uint32_t)this->trace_data[this->trace_data_offset + 4]) << 24;
 
-  uint64_t prev_address = this->address_reg;
-  this->address_reg = (prev_address & ~masks ) | (address & masks);
-  Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_32IS0, 5, 0, 0, this->address_reg};
+  uint64_t prev_address = this->address_regs[0];
+  Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_32IS0, 5, 0, 0, (prev_address & ~masks ) | (address & masks)};
   return packet;
 }
 
@@ -421,9 +438,8 @@ Packet Decoder::decodeAddressLong32IS1Packet(){
       ((uint32_t)this->trace_data[this->trace_data_offset + 3]) << 16 |
       ((uint32_t)this->trace_data[this->trace_data_offset + 4]) << 24;
 
-  uint64_t prev_address = this->address_reg;
-  this->address_reg = (prev_address & ~masks ) | (address & masks);
-  Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_32IS1, 5, 0, 0, this->address_reg};
+  uint64_t prev_address = this->address_regs[0];
+  Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_32IS1, 5, 0, 0, (prev_address & ~masks ) | (address & masks)};
   return packet;
 }
 
@@ -446,8 +462,6 @@ Packet Decoder::decodeAddressLong64IS0Packet() {
       ((uint64_t)this->trace_data[this->trace_data_offset + 7]) << 48 |
       ((uint64_t)this->trace_data[this->trace_data_offset + 8]) << 56;
 
-  this->address_reg = address;
-
   Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_64IS0, 9, 0, 0, address};
   return packet;
 }
@@ -469,8 +483,6 @@ Packet Decoder::decodeAddressLong64IS1Packet() {
       ((uint64_t)this->trace_data[this->trace_data_offset + 6]) << 40 |
       ((uint64_t)this->trace_data[this->trace_data_offset + 7]) << 48 |
       ((uint64_t)this->trace_data[this->trace_data_offset + 8]) << 56;
-
-  this->address_reg = address;
 
   Packet packet = {PacketType::ETM4_PKT_I_ADDR_L_64IS1, 9, 0, 0, address};
   return packet;
@@ -506,8 +518,6 @@ Packet Decoder::decodeAddressLong32IS0WithContextPacket(){
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
 
-  address_reg = address;
-
   const Packet packet = {PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS0,
                          5 + context_packet_size, 0, 0, address};
   return packet;
@@ -542,8 +552,6 @@ Packet Decoder::decodeAddressLong32IS1WithContextPacket(){
   if (rest_data_size < 5 + context_packet_size) {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
-
-  address_reg = address;
 
   const Packet packet = {PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS1,
                          5 + context_packet_size, 0, 0, address};
@@ -587,8 +595,6 @@ Packet Decoder::decodeAddressLong64IS1WithContextPacket(){
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
 
-  address_reg = address;
-
   const Packet packet = {PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1,
                          9 + context_packet_size, 0, 0, address};
   return packet;
@@ -631,8 +637,6 @@ Packet Decoder::decodeAddressLong64IS0WithContextPacket() {
   if (rest_data_size < 9 + context_packet_size) {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
-
-  address_reg = address;
 
   const Packet packet = {PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0,
                          9 + context_packet_size, 0, 0, address};
@@ -810,6 +814,22 @@ std::string Packet::toString() const {
 
   case PacketType::ETM4_PKT_I_EXCEPT:
     stream << "ETM4_PKT_I_EXCEPT";
+    break;
+
+  case PacketType::ETM4_PKT_I_EXCEPT_DATA_FAULT:
+    stream << "ETM4_PKT_I_EXCEPT_DATA_FAULT";
+    break;
+
+  case PacketType::ETM4_PKT_I_EXCEPT_INST_FAULT:
+    stream << "ETM4_PKT_I_EXCEPT_INST_FAULT";
+    break;
+
+  case PacketType::ETM4_PKT_I_EXCEPT_IRQ:
+    stream << "ETM4_PKT_I_EXCEPT_IRQ";
+    break;
+
+  case PacketType::ETM4_PKT_I_EXCEPT_FIQ:
+    stream << "ETM4_PKT_I_EXCEPT_FIQ";
     break;
 
   case PacketType::ETM4_PKT_I_ADDR_S_IS0:

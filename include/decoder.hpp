@@ -15,6 +15,10 @@ enum class PacketType {
 
   // Exceptions
   ETM4_PKT_I_EXCEPT,
+  ETM4_PKT_I_EXCEPT_IRQ,
+  ETM4_PKT_I_EXCEPT_FIQ,
+  ETM4_PKT_I_EXCEPT_INST_FAULT,
+  ETM4_PKT_I_EXCEPT_DATA_FAULT,
 
   // Address and Context
   ETM4_PKT_I_CTXT,
@@ -79,12 +83,11 @@ struct Decoder {
   std::size_t trace_data_offset;
   DecodeState state;
 
-  std::uint64_t address_reg;
   std::array<std::uint64_t, 3> address_regs = {0,0,0};
 
   Packet decodePacket();
   void reset();
-  void update_address_regs(uint64_t);
+  void updateAddressRegs(uint64_t);
 
 private:
   Packet decodeExtensionPacket();
