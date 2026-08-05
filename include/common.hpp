@@ -16,6 +16,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 using addr_t = std::uint64_t;
 using image_id_t = std::size_t;

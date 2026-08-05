@@ -268,10 +268,10 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
 
       case PacketType::ETM4_PKT_I_OVERFLOW: {
         // An Overflow packet is output in the data trace stream whenever the
-        // data trace buffer in the trace unit overflows. This means that part
-        // of the data trace stream might be lost, and tracing is inactive until
-        // the overflow condition clears. An Overflow packet is intentionally
-        // ignored.
+        // data trace buffer in the trace unit overflows. Part of the trace
+        // stream is lost, so truncate decoding here rather than silently
+        // resyncing into the following Trace On packet.
+        return ProcessResultType::PROCESS_ERROR_OVERFLOW_PACKET;
       }
 
       // A trace on packet indicates a discontinuity in the trace stream. After
@@ -564,6 +564,12 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_EXCEPT:
         this->decoder.state = DecodeState::EXCEPTION_ADDR1;
         break;
+
+      case PacketType::ETM4_PKT_I_OVERFLOW: {
+        // Part of the trace stream is lost; truncate decoding here rather
+        // than silently resyncing into the following Trace On packet.
+        return ProcessResultType::PROCESS_ERROR_OVERFLOW_PACKET;
+      }
 
       case PacketType::ETM4_PKT_I_TRACE_ON:
         this->decoder.state = DecodeState::WAIT_ADDR_AFTER_TRACE_ON;

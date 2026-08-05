@@ -2,6 +2,9 @@
 /* Copyright 2021 Ricerca Security, Inc. All rights reserved. */
 
 #pragma once
+
+#include "common.hpp"
+
 #include <array>
 
 enum class PacketType {
