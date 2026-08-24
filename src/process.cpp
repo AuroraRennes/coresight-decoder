@@ -29,6 +29,8 @@ void Process::reset(std::vector<MemoryMap> &&memory_maps,
   this->decoder.reset();
   this->state.reset(std::move(memory_maps));
   this->exception_state = false;
+  this->pre_exception_location = std::nullopt;
+  this->exception_resume_location = std::nullopt;
 }
 
 ProcessResultType Process::final() {
@@ -117,7 +119,7 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
         // abort();
         /*
         Idx:85704; ID:10;	I_TRACE_ON : Trace On.
-        Idx:85705; ID:10;	I_ADDR_CTXT_L_64IS0 : Address & Context, Long, 64 bit, IS0.; Addr=0x00000000400000A8; Ctxt: AArch32, EL0, NS; 
+        Idx:85705; ID:10;	I_ADDR_CTXT_L_64IS0 : Address & Context, Long, 64 bit, IS0.; Addr=0x00000000400000A8; Ctxt: AArch32, EL0, NS;
         Idx:85716; ID:10;	I_TRACE_ON : Trace On.
         */
           break;
@@ -155,7 +157,16 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_ATOM_F5:
       case PacketType::ETM4_PKT_I_ATOM_F6: {
         if(this->exception_state) {
+          // Execution resumed; make the window neutral for coverage.
           this->exception_state = false;
+          // Put the anchor back where it was. If there was none to save, the
+          // exception masked the re-anchor that would normally have happened,
+          // so fall back to the address execution resumed at.
+          this->state.prev_location = this->pre_exception_location.has_value()
+                                          ? this->pre_exception_location
+                                          : this->exception_resume_location;
+          this->pre_exception_location = std::nullopt;
+          this->exception_resume_location = std::nullopt;
         }
         // When processing an atom packet, there is an unprocessed indirect
         // branch instruction. If there is an unprocessed indirect branch
@@ -163,7 +174,12 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
         // When this error occurs, there is probably a bug in this program
         // itself.
         assert(this->state.has_pending_address_packet == false);
-        assert(this->state.prev_location.has_value() == true);
+        // Trace resumed outside the memory map, so there is no anchor to
+        // attribute this atom to. Skip it instead of dereferencing an empty
+        // optional, which used to abort the whole decode via bad_optional_access.
+        if (not this->state.prev_location.has_value()) {
+          break;
+        }
 
 #if defined(CACHE_MODE)
         const TraceKey trace_key(this->state.prev_location.value(),
@@ -215,8 +231,14 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         this->decoder.updateAddressRegs(packet.addr);
-        if(this->exception_state)
+        // Inside an exception window the address regs describe the handler,
+        // not the traced program; skip without disturbing prev_location, but
+        // keep the resume address as a fallback anchor.
+        if (this->exception_state) {
+          this->exception_resume_location =
+              getLocation(state.memory_maps, packet.addr);
           break;
+        }
         // An address packet is generated in the following three cases:
         //   1. Generated to indicate the trace start address at the start of
         //      the trace.
@@ -255,14 +277,16 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       // shows the address to return after the exception, and the second shows
       // the address where execution actually resumed after the exception.
       // Therefore, the user space trace ignores these two address packets.
-      case PacketType::ETM4_PKT_I_EXCEPT: 
+      case PacketType::ETM4_PKT_I_EXCEPT:
       case PacketType::ETM4_PKT_I_EXCEPT_IRQ:
       case PacketType::ETM4_PKT_I_EXCEPT_FIQ:
       case PacketType::ETM4_PKT_I_EXCEPT_INST_FAULT:
       case PacketType::ETM4_PKT_I_EXCEPT_DATA_FAULT: {
         this->decoder.state = DecodeState::EXCEPTION_ADDR1;
-        if (packet.type == PacketType::ETM4_PKT_I_EXCEPT_IRQ || packet.type == PacketType::ETM4_PKT_I_EXCEPT_FIQ)
-          this->exception_state = true;  
+        // Cascading exceptions keep the outermost anchor.
+        if (not this->exception_state)
+          this->pre_exception_location = this->state.prev_location;
+        this->exception_state = true;
         break;
       }
 
@@ -296,7 +320,7 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       packet, an Exact Match Address packet, or an Address with Context packet, complete with header.
       From: ARM IHI0064H.b, ID101923, page 6-267
       */
-      if (packet.type == PacketType::ETM4_PKT_I_ADDR_S_IS0 || 
+      if (packet.type == PacketType::ETM4_PKT_I_ADDR_S_IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_32IS0) {
         this->decoder.state = DecodeState::EXCEPTION_ADDR2;
@@ -529,12 +553,12 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_ADDR_L_64IS1:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS0:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_32IS1:
-      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1: 
+      case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1:
       case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0: {
         this->decoder.updateAddressRegs(packet.addr);
         const std::optional<Location> optional_target_location =
             getLocation(this->memory_maps, packet.addr);
-        if (not optional_target_location.has_value()) { 
+        if (not optional_target_location.has_value()) {
           if (this->ctx_en_bits_len != 0) {
           this->ctx_hash = hashString(this->ctx_hash, this->ctx_en_bits);
           this->ctx_en_bits = "";
@@ -582,10 +606,10 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
     }
 
     case DecodeState::EXCEPTION_ADDR1: {
-      if (packet.type == PacketType::ETM4_PKT_I_ADDR_S_IS0 || 
+      if (packet.type == PacketType::ETM4_PKT_I_ADDR_S_IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_32IS0 ||
-          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 || 
+          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1) {
           this->decoder.state = DecodeState::EXCEPTION_ADDR2;
       }
@@ -594,9 +618,9 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
     }
 
     case DecodeState::EXCEPTION_ADDR2: {
-      if (packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0 || 
+      if (packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1 ||
-          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 || 
+          packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS0 ||
           packet.type == PacketType::ETM4_PKT_I_ADDR_L_64IS1) {

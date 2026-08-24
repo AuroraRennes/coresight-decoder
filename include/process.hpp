@@ -66,6 +66,11 @@ struct Process {
   ProcessData data;
   ProcessState state;
   bool exception_state = false;
+  // Anchor saved on entry to an IRQ/FIQ window, restored when execution
+  // resumes, so the exception leaves prev_location exactly as it found it.
+  std::optional<Location> pre_exception_location = std::nullopt;
+  // Address execution resumed at, used only when there was no anchor to save.
+  std::optional<Location> exception_resume_location = std::nullopt;
   Deformatter deformatter;
   Decoder decoder;
 
