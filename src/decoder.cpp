@@ -17,7 +17,7 @@ Packet Decoder::decodePacket() {
   Packet result{};
 
   switch (header) {
-  // Long Address 64-bit IS1 Long 0b10011110  
+  // Long Address 64-bit IS1 Long 0b10011110
   case 0b10011110:
     result = this->decodeAddressLong64IS1Packet();
     break;
@@ -55,7 +55,7 @@ Packet Decoder::decodePacket() {
   case 0b10000000 ... 0b10000001:
     result = this->decodeContextPacket();
     break;
-  
+
   // Exact Match Address packet header: 0b10010000 to 0b10010010
   case 0b10010000 ... 0b10010010:
     result = decodeExactMatchAddressPacket();
@@ -180,7 +180,7 @@ Packet Decoder::decodeExtensionPacket() {
 
   // Overflow packet
   if (this->trace_data[this->trace_data_offset + 1] == 0x5) {
-    // Address packets may be missed due to a break in the route, 
+    // Address packets may be missed due to a break in the route,
     // so it is necessary to reset the saved addresses.
     this->address_regs.fill(0);
     return Packet{PacketType::ETM4_PKT_I_OVERFLOW, 2, 0, 0, 0};
@@ -218,11 +218,44 @@ Packet Decoder::decodeTraceInfoPacket() {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
 
-  std::size_t packet_size = 2;
-  while (this->trace_data[packet_size - 1] & 0b10000000) {
-    break;
+  // Trace Info instruction trace packet
+  //
+  // Layout is header + PLCTL, then one field per bit set in PLCTL[3:0]:
+  // INFO (bit 0), KEY (bit 1), SPEC (bit 2), CYCT (bit 3). Every field is
+  // continuation-encoded: bit 7 set means another byte follows.
+  const std::size_t start = this->trace_data_offset;
+  const std::size_t lim = this->trace_data.size();
+  std::size_t i = start + 1;  // skip header
+
+  // PLCTL
+  std::uint32_t plctl = 0;
+  {
+    std::size_t shift = 0;
+    while (true) {
+      if (i >= lim) {
+        return Packet{PacketType::PKT_INCOMPLETE, lim - start, 0, 0, 0};
+      }
+      const std::uint8_t b = this->trace_data[i++];
+      plctl |= static_cast<std::uint32_t>(b & 0x7F) << shift;
+      shift += 7;
+      if (not(b & 0x80)) break;
+    }
   }
-  // Trace Info instruction trace packet ARM IHI0064H.b 6-261 
+
+  // INFO / KEY / SPEC / CYCT, each present only if its PLCTL bit is set.
+  for (int field = 0; field < 4; field++) {
+    if (not(plctl & (1u << field))) continue;
+    while (true) {
+      if (i >= lim) {
+        return Packet{PacketType::PKT_INCOMPLETE, lim - start, 0, 0, 0};
+      }
+      const std::uint8_t b = this->trace_data[i++];
+      if (not(b & 0x80)) break;
+    }
+  }
+
+  const std::size_t packet_size = i - start;
+
   this->address_regs.fill(0);
 
   const Packet packet = {
@@ -325,10 +358,10 @@ Packet Decoder::decodeExceptionPacket() {
     case 0b01111:
       type = PacketType::ETM4_PKT_I_EXCEPT_FIQ;
       break;
-    default: 
+    default:
       type = PacketType::ETM4_PKT_I_EXCEPT;
       break;
-  }   
+  }
   std::size_t packet_size = c ? 3 : 2;
   // Header is correct, but packet size is incomplete.
   if (rest_data_size < packet_size) {
@@ -413,7 +446,7 @@ Packet Decoder::decodeAddressLong32IS0Packet(){
   if (rest_data_size < 5) {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
-  uint64_t masks = 0xffffffff;  
+  uint64_t masks = 0xffffffff;
   // trace_data[this->trace_data_offset] is header
   uint32_t address = ((uint32_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 2 |
       ((uint32_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 9 |
@@ -431,7 +464,7 @@ Packet Decoder::decodeAddressLong32IS1Packet(){
   if (rest_data_size < 5) {
     return Packet{PacketType::PKT_INCOMPLETE, rest_data_size, 0, 0, 0};
   }
-  uint64_t masks = 0xffffffff;  
+  uint64_t masks = 0xffffffff;
   // trace_data[this->trace_data_offset] is header
   uint32_t address = ((uint32_t)(this->trace_data[this->trace_data_offset + 1] & 0x7F)) << 1 |
       ((uint32_t)(this->trace_data[this->trace_data_offset + 2] & 0x7F)) << 8 |
@@ -657,7 +690,7 @@ Packet Decoder::decodeExactMatchAddressPacket(){
     case 0b10:
       packet = {PacketType::ETM4_ADDR_MATCH, 1, 0, 0, address_regs[2]};
       break;
-  }   
+  }
   return packet;
 }
 
