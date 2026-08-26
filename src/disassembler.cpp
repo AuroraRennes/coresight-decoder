@@ -101,9 +101,9 @@ static const std::uint16_t indirect_branch_opcode_arm32[] = {
     ARM_INS_BX,
     ARM_INS_BLX,
     ARM_INS_ERET,
-    
-    // Load/Store 
-    ARM_INS_POP,    // POP {Rn, pc}   
+
+    // Load/Store
+    ARM_INS_POP,    // POP {Rn, pc}
     ARM_INS_LDR,    // LDR{cond} pc, [Rn, #imm]
     ARM_INS_LDM,    // LDM{cond} Rn!, {…, pc}
     ARM_INS_STM,    // STM{cond} Rn!, {…, pc}
@@ -127,11 +127,11 @@ static const std::uint16_t isb_branch_opcode_arm32[] = {
 
 void disassembleInit(csh *handle) {
   // Initialize capstone
- 
+
   A32_mode = std::getenv("ARM32");
   cs_arch arch = A32_mode ? CS_ARCH_ARM : CS_ARCH_ARM64;
   cs_err err = cs_open(arch, CS_MODE_ARM, handle);
-  
+
   if (err != CS_ERR_OK) {
     std::cerr << "Failed on cs_open() with error returned: " << err
               << std::endl;
@@ -147,6 +147,15 @@ BranchInsn getNextBranchInsn(const csh &handle, const Location &location,
   cs_insn *insn = disassembleNextBranchInsn(
       &handle, &memory_images[location.id], location.offset);
 
+  if (insn == nullptr) {
+    // No branch reachable from `location`: the trace is desynchronized here.
+    // NOT_BRANCH tells the caller to drop its anchor and resync on the next
+    // address packet.
+    return BranchInsn{
+        BranchType::NOT_BRANCH, location.offset, 0, 0, location.id,
+    };
+  }
+
   const BranchType type = decodeInstOpecode(insn);
   const addr_t offset = insn->address;
 
@@ -156,7 +165,7 @@ BranchInsn getNextBranchInsn(const csh &handle, const Location &location,
           : (type == BranchType::ISB_BRANCH) ? insn->address + insn->size : 0;
   const addr_t not_taken_offset = offset + insn->size;
       //(type == BranchType::DIRECT_BRANCH) ? offset + insn->size : 0;
-      
+
   const BranchInsn branch_insn{
       type, offset, taken_offset, not_taken_offset, location.id,
   };
@@ -213,8 +222,8 @@ cs_insn *disassembleNextBranchInsn(const csh *handle,
   // release the cache memory when done
   cs_free(insn, 1);
 
-  std::cerr << "Cannot find branch instruction" << std::endl;
-  std::exit(1);
+  // Cannot find a branch instruction, report to caller.
+  return nullptr;
 }
 
 std::uint64_t getAddressFromInsn(const cs_insn *insn) {
@@ -237,7 +246,7 @@ std::uint64_t getAddressFromInsn(const cs_insn *insn) {
       std::stol(insn->op_str + address_index, nullptr, 16);
   return address;
 }
- 
+
 bool is_a32_branch(const cs_insn *insn)
 {
     const uint8_t *b = insn->bytes;
@@ -268,7 +277,7 @@ bool is_a32_branch(const cs_insn *insn)
         if (((w >> 12) & 0xf) == 15) // check PC
         {
           /*
-          ARM_INS_POP, // POP {Rn, pc} 
+          ARM_INS_POP, // POP {Rn, pc}
           ARM_INS_LDR, // LDR{cond} pc, [Rn, #imm] ldrls pc, [pc, r2, lsl #2]
           */
           return true;
@@ -293,7 +302,7 @@ bool is_a32_branch(const cs_insn *insn)
 
 BranchType decodeInstOpecode(const cs_insn *insn) {
   if(A32_mode) {
-    
+
     for (const std::uint16_t opcode : direct_branch_opcode_arm32) {
       if (insn->id == opcode) {
         return BranchType::DIRECT_BRANCH;
@@ -317,7 +326,7 @@ BranchType decodeInstOpecode(const cs_insn *insn) {
 
     return BranchType::NOT_BRANCH;
   }
-  else 
+  else
   {
     for (const std::uint16_t opcode : direct_branch_opcode) {
       if (insn->id == opcode) {

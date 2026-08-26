@@ -356,6 +356,14 @@ AtomTrace Process::processAtomPacket(const Packet &atom_packet) {
 
     const BranchInsn insn = processNextBranchInsn(base_location);
 
+    if (insn.type == BranchType::NOT_BRANCH) {
+      // No branch instruction is reachable from base_location, so this atom
+      // cannot be attributed.
+      this->state.prev_location = std::nullopt;
+      this->state.has_pending_address_packet = false;
+      break;
+    }
+
     bool is_taken = atom_packet.en_bits & (1 << i);
 
     // In the case of an indirect branch instruction, an atom packet (E) and an
