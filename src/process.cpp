@@ -19,6 +19,17 @@
 #include <csignal>
 #include <cstdlib>
 
+// AFLCS_TRUNCATE_ON_OVERFLOW=1 stops decoding at an Overflow packet. Default 0
+// keeps upstream's behaviour of decoding across the gap.
+static bool truncate_on_overflow()
+{
+  static const bool on = [] {
+    const char *v = std::getenv("AFLCS_TRUNCATE_ON_OVERFLOW");
+    return v && std::atoi(v) != 0;
+  }();
+  return on;
+}
+
 std::vector<std::pair<std::string, uint64_t>> insn_flow;
 bool need_save_insn_flow = false;
 
@@ -293,10 +304,13 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_OVERFLOW: {
         // An Overflow packet is output in the data trace stream whenever the
         // data trace buffer in the trace unit overflows. Part of the trace
-        // stream is lost, so truncate decoding here rather than silently
-        // resyncing into the following Trace On packet.
-        return ProcessResultType::PROCESS_ERROR_OVERFLOW_PACKET;
+        // stream is lost. With AFLCS_TRUNCATE_ON_OVERFLOW=1, truncate decoding
+        // here; by default, as upstream, fall through and resync on the
+        // following Trace On packet.
+        if (truncate_on_overflow())
+          return ProcessResultType::PROCESS_ERROR_OVERFLOW_PACKET;
       }
+      [[fallthrough]];
 
       // A trace on packet indicates a discontinuity in the trace stream. After
       // the trace on packet is generated, the trace unit generates an address
@@ -597,11 +611,12 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
         this->decoder.state = DecodeState::EXCEPTION_ADDR1;
         break;
 
-      case PacketType::ETM4_PKT_I_OVERFLOW: {
-        // Part of the trace stream is lost; truncate decoding here rather
-        // than silently resyncing into the following Trace On packet.
-        return ProcessResultType::PROCESS_ERROR_OVERFLOW_PACKET;
-      }
+      case PacketType::ETM4_PKT_I_OVERFLOW:
+        // Part of the trace stream is lost. With AFLCS_TRUNCATE_ON_OVERFLOW=1,
+        // truncate decoding here; by default, as upstream, ignore it.
+        if (truncate_on_overflow())
+          return ProcessResultType::PROCESS_ERROR_OVERFLOW_PACKET;
+        break;
 
       case PacketType::ETM4_PKT_I_TRACE_ON:
         this->decoder.state = DecodeState::WAIT_ADDR_AFTER_TRACE_ON;
