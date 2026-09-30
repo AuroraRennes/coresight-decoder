@@ -30,6 +30,17 @@ static bool truncate_on_overflow()
   return on;
 }
 
+// AFLCS_RESYNC_ON_LEFTOVER=1 skips leftover bytes at the window start (see
+// Process::run()). Default 0 keeps upstream's behaviour of rejecting the trace.
+static bool resync_on_leftover()
+{
+  static const bool on = [] {
+    const char *v = std::getenv("AFLCS_RESYNC_ON_LEFTOVER");
+    return v && std::atoi(v) != 0;
+  }();
+  return on;
+}
+
 std::vector<std::pair<std::string, uint64_t>> insn_flow;
 bool need_save_insn_flow = false;
 
@@ -42,6 +53,22 @@ void Process::reset(std::vector<MemoryMap> &&memory_maps,
   this->exception_state = false;
   this->pre_exception_location = std::nullopt;
   this->exception_resume_location = std::nullopt;
+  this->synced = not resync_on_leftover();
+}
+
+// A 64-bit long address carries the full address, independent of earlier
+// packets, and eight arbitrary bytes are very unlikely to land in the traced
+// memory map: a safe place to resume after leftover bytes at the window start.
+bool Process::isResyncAnchor(const Packet &packet) const {
+  switch (packet.type) {
+  case PacketType::ETM4_PKT_I_ADDR_L_64IS0:
+  case PacketType::ETM4_PKT_I_ADDR_L_64IS1:
+  case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS0:
+  case PacketType::ETM4_PKT_I_ADDR_CTXT_L_64IS1:
+    return getLocation(this->state.memory_maps, packet.addr).has_value();
+  default:
+    return false;
+  }
 }
 
 ProcessResultType Process::final() {
@@ -85,6 +112,22 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
     // put to rest and new data is received.
     if (packet.type == PacketType::PKT_INCOMPLETE) {
       return ProcessResultType::PROCESS_SUCCESS;
+    }
+
+    // Sinks-only cycling leaves the ETM running, so a window normally starts
+    // on a Trace On and a long address, with no A-Sync. When the previous sink
+    // stop cut an ETM preamble (A-Sync, TraceInfo, address) in two, its last
+    // bytes lead this window instead. Until the stream is aligned, advance one
+    // byte at a time looking for an A-Sync or a long address in the traced
+    // range, instead of decoding the leftover bytes and rejecting the whole
+    // trace at the first atom.
+    if (not this->synced) {
+      if (packet.type == PacketType::ETM4_PKT_I_ASYNC or isResyncAnchor(packet)) {
+        this->synced = true;
+      } else {
+        this->decoder.trace_data_offset += 1;
+        continue;
+      }
     }
 
     this->decoder.trace_data_offset += packet.size;

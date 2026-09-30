@@ -71,6 +71,11 @@ struct Process {
   std::optional<Location> pre_exception_location = std::nullopt;
   // Address execution resumed at, used only when there was no anchor to save.
   std::optional<Location> exception_resume_location = std::nullopt;
+  // False until the stream is aligned on a packet boundary: an A-Sync, or a
+  // 64-bit long address inside the traced memory map when the window starts
+  // on leftover bytes of a preamble cut by the previous sink stop. Starts true,
+  // skipping nothing, unless AFLCS_RESYNC_ON_LEFTOVER=1.
+  bool synced = false;
   Deformatter deformatter;
   Decoder decoder;
 
@@ -89,6 +94,7 @@ private:
   std::optional<AddressTrace>
   processAddressPacket(const Packet &address_packet);
   BranchInsn processNextBranchInsn(const Location &base_location);
+  bool isResyncAnchor(const Packet &packet) const;
 };
 
 struct PathProcess {
