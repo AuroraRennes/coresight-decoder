@@ -143,6 +143,17 @@ void disassembleDelete(csh *handle) { cs_close(handle); }
 
 BranchInsn getNextBranchInsn(const csh &handle, const Location &location,
                              const std::vector<MemoryImage> &memory_images) {
+  // A location derived from a disassembled branch (not from an address packet,
+  // which getLocation() already range-checks) can fall outside its image when
+  // the walk started on bytes that are not code. Treat it as a desync instead
+  // of reading past the image.
+  if (location.id >= memory_images.size() ||
+      location.offset >= memory_images[location.id].data.size()) {
+    return BranchInsn{
+        BranchType::NOT_BRANCH, location.offset, 0, 0, location.id,
+    };
+  }
+
   // Find the first branch instruction after the address indicated by location.
   cs_insn *insn = disassembleNextBranchInsn(
       &handle, &memory_images[location.id], location.offset);
