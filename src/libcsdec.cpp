@@ -284,6 +284,8 @@ libcsdec_result_t libcsdec_finish_path(const libcsdec_t libcsdec) {
   return covert_result_type(result);
 }
 
+unsigned long libcsdec_overflow_packets(void) { return overflow_packets; }
+
 libcsdec_result_t covert_result_type(ProcessResultType result) {
   switch (result) {
   case ProcessResultType::PROCESS_SUCCESS:

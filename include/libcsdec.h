@@ -79,6 +79,12 @@ libcsdec_result_t libcsdec_run_path(const libcsdec_t libcsdec,
 
 libcsdec_result_t libcsdec_finish_path(const libcsdec_t libcsdec);
 
+/**
+    Number of Overflow packets decoded since start-up, over all sessions. It
+    counts the packets that did not end the decoding as well.
+**/
+unsigned long libcsdec_overflow_packets(void);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

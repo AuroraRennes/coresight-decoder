@@ -41,6 +41,10 @@ static bool resync_on_leftover()
   return on;
 }
 
+// Overflow packets seen since start-up, counted whether or not decoding is
+// truncated there (libcsdec_overflow_packets()).
+unsigned long overflow_packets = 0;
+
 std::vector<std::pair<std::string, uint64_t>> insn_flow;
 bool need_save_insn_flow = false;
 
@@ -350,6 +354,7 @@ ProcessResultType Process::run(const std::uint8_t *trace_data_addr,
         // stream is lost. With AFLCS_TRUNCATE_ON_OVERFLOW=1, truncate decoding
         // here; by default, as upstream, fall through and resync on the
         // following Trace On packet.
+        overflow_packets++;
         if (truncate_on_overflow())
           return ProcessResultType::PROCESS_ERROR_OVERFLOW_PACKET;
       }
@@ -657,6 +662,7 @@ ProcessResultType PathProcess::run(const std::uint8_t *trace_data_addr,
       case PacketType::ETM4_PKT_I_OVERFLOW:
         // Part of the trace stream is lost. With AFLCS_TRUNCATE_ON_OVERFLOW=1,
         // truncate decoding here; by default, as upstream, ignore it.
+        overflow_packets++;
         if (truncate_on_overflow())
           return ProcessResultType::PROCESS_ERROR_OVERFLOW_PACKET;
         break;

@@ -11,6 +11,8 @@
 #include "deformatter.hpp"
 #include "trace.hpp"
 
+extern unsigned long overflow_packets;
+
 enum class ProcessResultType {
   PROCESS_SUCCESS,
   PROCESS_ERROR_OVERFLOW_PACKET,
